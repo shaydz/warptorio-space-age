@@ -1,4 +1,110 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.4.16
+Date: 2026-09-14
+  Changes:
+    - Warn before a forced warp: chat warning 60 seconds before the Nauvis time limit expires, plus
+      a 5-second on-screen countdown (on every floor) once a warp vote passes
+    - Modded boss variants are now planet-bound: maf-boss-* only spawn on their home planet, with
+      an optional boss_rare_planets table letting them appear elsewhere at a reduced weight
+      (explosive spitters now 0.05 instead of 0.2, so they no longer dominate the pool)
+    - Boss rebalance: max 16 concurrent bosses (was 24), wave flood capped at 50%, boss health x3,
+      and boss presence/cadence scales with warp count
+    - Bosses now read as big red map dots: bosses get private enlarged prototypes (collision box
+      never smaller than pentapod size) with scaled health, and the chart ring reveals the boss
+      spawn radius
+    - Add spawn-boss-wave button to the warp cheat GUI; only one boss alert is shown per warp
+    - Platform builds outward from the core in a smooth, SA-style expanding wave (build animation
+      reworked so it actually fires)
+    - Train fix: fluid trains keep their 1:1 pump/wagon alignment after a ground warp, no forced
+      re-dock; refined concrete tiles no longer grant a movement speed boost
+    - Clarify warp train tech descriptions; README documents the new boss-spawn-reveal setting
+---------------------------------------------------------------------------------------------------
+Version: 0.4.15
+Date: 2026-09-12
+  Changes:
+    - Bosses now drop random loot when killed: modules and unlocked science packs (promethium
+      excluded), gated by warp progress and matching the boss quality. Two new runtime settings:
+      warptorio_boss-loot (toggle), warptorio_boss-loot-count (max items per boss, 0-5) and
+      warptorio_boss-loot-chance (drop probability, default 25%)
+    - Boss spawning, tracking and loot moved into the new boss_system module (continued modular
+      refactor); dead wave_system/warp_system modules removed
+    - Boss registration now survives quality replacement, so upgraded bosses still drop loot
+    - Next-destination chat message now shows a planet icon, or the Warp Void signal when the
+      destination is void (new hidden virtual-signal warptorio-void-destination)
+    - Fix: virtual-signal warptorio-void-destination referenced a non-existent item-subgroup,
+      which prevented the mod from loading
+---------------------------------------------------------------------------------------------------
+Version: 0.4.14
+Date: 2026-09-12
+  Changes:
+- Fix: wire disconnect issue after warp capacitor upgrade research. Wires are re-created a tick
+      later as normal player wires, so they render exactly like hand-placed wires instead of being
+      hidden
+    - Fix: ground platform size upgrades requested while the platform is warping are deferred and
+      applied when the warp finishes instead of being dropped
+    - Research on ground/repair platform during a warp transition is now genuinely paused (new
+      research_pause module): progress is preserved while labs stop draining science packs, and the
+      research resumes from its saved progress after the warp instead of being reset
+    - Platform expansion tiles now reveal progressively as their build animations finish instead of
+      all appearing at once, and pending expansions are cancelled cleanly by a platform repair
+    - Power capacitor creation/upgrade/reconnect logic extracted into the new power_tick module;
+      continued modular refactor of the warp and platform subsystems
+---------------------------------------------------------------------------------------------------
+Version: 0.4.13
+Date: 2026-09-11
+  Changes:
+    - Fix: teleporter zone visualization now draws at the correct position on the ground floor
+      (pads are offset per surface, visualization was drawn at the raw offset instead)
+    - Fix: clone_brush fluid workaround comment updated to match reality (no on_entity_cloned handler)
+---------------------------------------------------------------------------------------------------
+Version: 0.4.12
+Date: 2026-09-09
+  Changes:
+    - Player teleport now plays a full multi-layer FX: 3-layer glow blast, 16 shockwave rings and
+      a spark burst (ported from factorio-ultracube, GPLv3), replacing the railgun-beam + circle ring
+    - Teleport boom sound now fires ~8 ticks after arrival, played per-player so it is always audible
+---------------------------------------------------------------------------------------------------
+Version: 0.4.11
+Date: 2026-09-09
+  Changes:
+    - Added custom events for other mods: warptorio-warp-started, warptorio-warp-finished,
+      warptorio-planet-chosen, warptorio-wave-spawned, warptorio-boss-spawned,
+      warptorio-game-over, warptorio-game-win (subscribe via script.on_event on
+      defines.events["warptorio-..."], see README "Events API" section)
+    - Added remote.call("warptorio", "get_events") to list all raised event names
+    - Fix: Repair Turret mod crash when clearing planet surfaces. Destroy repair-turrets
+      with raise_destroy before clear/delete so the mod cleans its surface-index registry
+---------------------------------------------------------------------------------------------------
+Version: 0.4.5
+Date: 2026-09-07
+  Changes:
+    - Re-link spidertron remotes (including saved quickbar slots) to the cloned spidertrons after the ground floor warp
+    - Players inside a car, tank or spidertron are no longer teleported: floor teleport pads and the teleport shortcut ignore vehicle riders, and during a warp the whole vehicle (with its occupants) is moved instead of ejecting the player
+---------------------------------------------------------------------------------------------------
+Version: 0.4.4
+Date: 2026-09-05
+  Changes:
+    - Fix: failed warp attempts no longer leave stale votes, blocking future votes
+    - Warp voting now only starts when engine is available (no votes during cooldown / warp not available)
+    - Admins force warp with shift-double-click (no vote bypass during cooldown)
+    - Added speech bubbles for warp/teleport blocks, already-voted, and container/collector placement feedback (chat fallback when no character)
+    - Added player eligibility filter for warps: new players (<1hr) and AFK players (>5min) cannot vote and don't count toward the vote threshold
+    - Player disconnect cleans all voting state to prevent phantom votes skewing the ratio
+    - Added new console command /warpcheat (whitelisted players only)
+    - Added speech bubble notifications for warp events
+    - Added platform reconstruction animation and capacitor fail state
+    - Added ground minimap shown while in factory/garden
+    - Added visual and audio effects to floor teleports (teleport.ogg arrival sound, startup setting for charge delay with progress bar)
+    - Added startup setting to change trail color
+    - Fixed garden issues
+    - Fixed train state during ground platform warp
+    - Fixed crash with `warp now` when warpcheat was not loading properly
+    - Fixed nukes creating lava on the platform
+    - Fixed clean_ground_tiles stripping leaked planet hazards (frozen-*, lava, etc.) after teleport
+    - Fixed player teleportation ignoring physical body during remote/map view
+    - Added fluid snapshot/restore
+    - Removed dead files
+---------------------------------------------------------------------------------------------------
 Version: 0.4.3
 Date: 2026-09-04
   Changes:

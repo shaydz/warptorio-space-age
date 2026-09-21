@@ -1,4 +1,6 @@
+local shared = require("shared")
 local warp_settings = require("internal_settings")
+local speech_bubbles = require("modules.speech_bubbles")
 
 local train_code = {}
 
@@ -221,14 +223,15 @@ function train_code.resolve_train_destination(surface_name, station_name)
       train_decision[#train_decision + 1] = { surface = gs, station = warp_settings.train.factory_station, destination = "factory" }
    end
 
-   if game.forces["player"].technologies[warp_settings.train.garden_research].researched then
-      train_decision[#train_decision + 1] = { surface = "garden", station = warp_settings.train.ground_station, destination = ground_surfaces[1] }
-      train_decision[#train_decision + 1] = { surface = "garden", station = warp_settings.train.factory_station, destination = "factory" }
-      for _, gs in ipairs(ground_surfaces) do
-         train_decision[#train_decision + 1] = { surface = gs, station = warp_settings.train.garden_station, destination = "garden" }
-      end
-      train_decision[#train_decision + 1] = { surface = "factory", station = warp_settings.train.garden_station, destination = "garden" }
+   -- Garden rows are intentionally not gated on research here: a train parked
+   -- at WarpGarden still resolves, so warp_trains can warn instead of failing
+   -- silently when the garden tech is missing.
+   train_decision[#train_decision + 1] = { surface = "garden", station = warp_settings.train.ground_station, destination = ground_surfaces[1] }
+   train_decision[#train_decision + 1] = { surface = "garden", station = warp_settings.train.factory_station, destination = "factory" }
+   for _, gs in ipairs(ground_surfaces) do
+      train_decision[#train_decision + 1] = { surface = gs, station = warp_settings.train.garden_station, destination = "garden" }
    end
+   train_decision[#train_decision + 1] = { surface = "factory", station = warp_settings.train.garden_station, destination = "garden" }
 
    for _, d in ipairs(train_decision) do
       if d.surface == surface_name and d.station == station_name then
@@ -236,6 +239,16 @@ function train_code.resolve_train_destination(surface_name, station_name)
       end
    end
    return nil
+end
+
+-- Puts a speech bubble on the train's front stock, falling back to chat.
+local function speak_on_train(train, msg, seconds)
+   local front = train and train.front_stock
+   if front and front.valid then
+      speech_bubbles.speak(front, msg, seconds or 5)
+   else
+      game.print(msg, {color={1,0.6,0}})
+   end
 end
 
 function train_code.queue_retry(train, station_name, reason_msg)
@@ -247,7 +260,7 @@ function train_code.queue_retry(train, station_name, reason_msg)
    end
    if not pending.warned and game.tick - pending.queued_at >= warp_settings.train.retry_warn_after then
       if not warp_settings.train.block_info_messages then
-         game.print(reason_msg, {color={1,0.6,0}})
+         speak_on_train(train, reason_msg, 5)
       end
       pending.warned = true
    end
@@ -437,8 +450,31 @@ end
 -- destination is the surface name the train should warp to. The caller decides it based on
 -- which warp station the train stopped at (ground floor, garden floor, or factory).
 function train_code.warp_trains(train, station_name, destination)
-   if not game.forces["player"].technologies["warp-train"].researched then return end
    if not train or not train.valid or not train.id then return end
+
+   if not game.forces["player"].technologies[shared.techs.train].researched then
+      -- Hard gate: tell the player once per parking. The train warps itself as
+      -- soon as the tech is researched (scan_for_parked_warps keeps polling it).
+      local queue = pending_warps()
+      local pending = queue[train.id]
+      if not pending then
+         queue[train.id] = { station_name = station_name, queued_at = game.tick, warned = true }
+         speak_on_train(train, {"warptorio.train-warp-needs-research"}, 5)
+      end
+      return
+   end
+
+   local source_surface = train.station and train.station.surface and train.station.surface.name
+   if (source_surface == "garden" or destination == "garden")
+      and not game.forces["player"].technologies[warp_settings.train.garden_research].researched then
+      local queue = pending_warps()
+      local pending = queue[train.id]
+      if not pending then
+         queue[train.id] = { station_name = station_name, queued_at = game.tick, warned = true }
+         speak_on_train(train, {"warptorio.train-warp-needs-garden-research"}, 5)
+      end
+      return
+   end
 
    local stations = game.train_manager.get_train_stops({station_name=station_name})
    for _, v in ipairs(stations) do
@@ -566,7 +602,7 @@ function train_code.warp_single_train(train, destination, target_station, source
    local new_train = train_code.warp_array(
       train.carriages, destination, target_station, source_station)
    if not new_train then
-      game.print({"warptorio.train-warp-error"}, { color = { 1, 0, 0 } })
+      speak_on_train(train, {"warptorio.train-warp-error"}, 5)
       -- Source train is still parked and intact (clones were rolled back), so
       -- queue a retry instead of giving up.
       train_code.queue_retry(train, source_station.backer_name, {"warptorio.train-warp-error"})
@@ -625,8 +661,8 @@ function train_code.freeze_ground_bound_trains(extra_surface)
    end
 end
 
--- After the warp: push any train left in manual back to automatic, restore
--- frozen speeds, clear stale entries.
+-- After the warp: restore frozen speeds, clear stale entries. Train mode and
+-- schedule are cloned 1:1 by restore_clone_states, so nothing is forced here.
 function train_code.resume_ground_bound_trains()
    local speeds = frozen_train_speeds()
    local floors = {}
@@ -640,11 +676,6 @@ function train_code.resume_ground_bound_trains()
          for _, carriage in ipairs(surface.find_entities_filtered{ type = warp_settings.train.stock }) do
             local train = carriage.train
             if train and train.valid then
-               -- Hands off trains a player is actually driving: manual + occupied
-               -- is deliberate, everything else gets forced back to automatic.
-               if not (train.manual_mode and #train.passengers > 0) then
-                  train.manual_mode = false
-               end
                local frozen = speeds[train.id]
                if frozen and frozen ~= 0 and train.speed == 0
                   and train.state ~= defines.train_state.wait_station

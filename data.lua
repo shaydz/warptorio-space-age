@@ -1,9 +1,11 @@
+local shared = require("shared")
 require("research")
 require("tips")
 require("prototypes/entities")
 require("prototypes/containers")
 require("prototypes/collector_container")
 require("prototypes/warp_constant_combinator")
+require("prototypes/speech_bubble")
 
 local function is_shadow(sprite)
   if sprite.draw_as_shadow then return true end
@@ -63,12 +65,23 @@ end
 --shortcut
 local shortcut = {
   type="shortcut",
-  name="warptorio-teleport",
+  name=shared.shortcut_teleport,
   action="lua",
-  icon="__warptorio-space-age__/graphics/home.png",
-  small_icon="__warptorio-space-age__/graphics/home.png"
+  icon="__warptorio-space-age-edge__/graphics/home.png",
+  small_icon="__warptorio-space-age-edge__/graphics/home.png"
 }
 data:extend{shortcut}
+
+--shortcut to toggle ground minimap
+local minimap_shortcut = {
+  type="shortcut",
+  name=shared.shortcut_minimap_toggle,
+  action="lua",
+  toggleable=true,
+  icon="__warptorio-space-age-edge__/graphics/map.png",
+  small_icon="__warptorio-space-age-edge__/graphics/map.png"
+}
+data:extend{minimap_shortcut}
 
 -- asteroid collectors
 
@@ -161,7 +174,7 @@ local tile_platform = table.deepcopy(data.raw["tile"][settings.startup["warptori
 tile_platform.minable_properties = {
   minable = false
 }
-tile_platform.name = "warp_tile_platform"
+tile_platform.name = shared.tiles.factory
 
 local function set_destructable(tile,name)
    if tile.max_health then
@@ -186,8 +199,296 @@ end
 
 local foundation = data.raw["tile"]["space-platform-foundation"]
 local tile_world = table.deepcopy(data.raw["tile"][settings.startup["warptorio_ground-tile"].value])
-set_destructable(tile_world,"warp_tile_world")
+set_destructable(tile_world,shared.tiles.ground)
+
+local function copy_build_animations(target, source)
+  if not source then return end
+  target.build_animations = target.build_animations or source.build_animations
+  target.build_animations_background = target.build_animations_background or source.build_animations_background
+  target.built_animation_frame = target.built_animation_frame or source.built_animation_frame
+end
+
+if foundation then
+  copy_build_animations(tile_world, foundation)
+
+  if tile_world.frozen_variant then
+    local frozen = data.raw["tile"][tile_world.frozen_variant]
+    if frozen then
+      copy_build_animations(frozen, foundation)
+    end
+  end
+  if tile_world.thawed_variant then
+    local thawed = data.raw["tile"][tile_world.thawed_variant]
+    if thawed then
+      copy_build_animations(thawed, foundation)
+    end
+  end
+
+  if foundation.build_animations then
+    for _, dir in ipairs({"north", "south", "east", "west"}) do
+      local anim = foundation.build_animations[dir]
+      if anim and anim.layers then
+        data:extend{{
+          type = "explosion",
+          name = shared.platform_build_anim .. "-" .. dir,
+          flags = {"not-on-map"},
+          animations = {{layers = util.table.deepcopy(anim.layers)}},
+          sound = nil,
+        }}
+      end
+    end
+  end
+end
 data:extend{tile_platform,tile_world}
+
+local function add_cluster_offsets(source, count, distance, angle_offset, t)
+  for i = 0, count - 1 do
+    local a = 2 * math.pi * (i + angle_offset) / count
+    local tt = table.deepcopy(t)
+    local x0 = distance * math.sin(a) * 0.75
+    local x1 = distance * math.sin(a)
+    local y0 = distance * math.cos(a) * 0.75
+    local y1 = distance * math.cos(a)
+    tt.offset_deviation = {{math.min(x0, x1), math.min(y0, y1)},
+                           {math.max(x0, x1), math.max(y0, y1)}}
+    source[#source + 1] = tt
+  end
+  return source
+end
+
+local function make_empty_animation(frame_count)
+  return {
+    filename = "__core__/graphics/empty.png",
+    priority = "high",
+    width = 1,
+    height = 1,
+    frame_count = 1,
+    repeat_count = frame_count,
+  }
+end
+
+local blue_light = {r=0.6, g=0.7, b=1.0}
+
+local function make_ring_particle(name, filename, width, height, shift)
+  return {
+    type = "optimized-particle",
+    name = name,
+    life_time = 100,
+    vertical_acceleration = 0,
+    fade_away_duration = 60,
+    render_layer = "object",
+    pictures = {
+      filename = filename,
+      priority = "high",
+      flags = {"smoke"},
+      line_length = 8,
+      width = width,
+      height = height,
+      frame_count = 32,
+      animation_speed = 0.5,
+      variation_count = 1,
+      shift = shift,
+      scale = 1.5 / 8,
+      tint = {0.5, 0.5, 0.5, 1.0},
+      blend_mode = "additive-soft",
+    },
+    shadows = {
+      filename = filename,
+      priority = "high",
+      flags = {"smoke"},
+      line_length = 8,
+      width = width,
+      height = height,
+      frame_count = 32,
+      animation_speed = 0.5,
+      variation_count = 1,
+      shift = shift,
+      scale = 1.5 / 8,
+      tint = {0, 0, 0, 0.5},
+    },
+  }
+end
+
+local function make_ring_particles()
+  return {
+    make_ring_particle(
+      shared.teleport_ring_1,
+      "__warptorio-space-age-edge__/graphics/effects/teleport-ring-1.png",
+      132, 136, util.by_pixel(-0.5, 0)),
+    make_ring_particle(
+      shared.teleport_ring_2,
+      "__warptorio-space-age-edge__/graphics/effects/teleport-ring-2.png",
+      110, 128, util.by_pixel(0, 3)),
+  }
+end
+
+local function make_teleport_ring_effect()
+  return {
+    type = "direct",
+    action_delivery = {
+      type = "instant",
+      source_effects = add_cluster_offsets(
+        add_cluster_offsets(
+          {},
+          8, 0.125, 0,
+          {
+            type = "create-particle",
+            particle_name = shared.teleport_ring_1,
+            repeat_count = 1,
+            initial_height = 0.125,
+            frame_speed = 1,
+            frame_speed_variation = 0.25,
+            tail_length = 12,
+            tail_width = 8,
+            speed_from_center = 0.015,
+            speed_from_center_deviation = 0,
+          }
+        ),
+        8, 0.125, 0.5,
+        {
+          type = "create-particle",
+          particle_name = shared.teleport_ring_2,
+          repeat_count = 1,
+          initial_height = 0.125,
+          frame_speed = 1,
+          frame_speed_variation = 0.25,
+          tail_length = 12,
+          tail_width = 8,
+          speed_from_center = 0.015,
+          speed_from_center_deviation = 0,
+        }
+      ),
+    },
+  }
+end
+
+local rings = make_ring_particles()
+
+data:extend({
+  rings[1],
+  rings[2],
+  {
+    type = "optimized-particle",
+    name = shared.teleport_spark_particle,
+    life_time = 20,
+    fade_away_duration = 8,
+    render_layer = "wires-above",
+    render_layer_when_on_ground = "corpse",
+    pictures = {
+      sheet = {
+        filename = "__base__/graphics/particle/pole-sparks/pole-sparks.png",
+        draw_as_glow = true,
+        line_length = 12,
+        width = 6,
+        height = 6,
+        frame_count = 12,
+        variation_count = 3,
+        animation_speed = 2,
+        scale = 0.5,
+        shift = util.by_pixel(0, 0)
+      }
+    },
+    movement_modifier_when_on_ground = 0,
+  },
+  {
+    type = "explosion",
+    name = shared.teleport_explosion,
+    localised_name = {"entity-name.medium-explosion"},
+    icon = "__base__/graphics/item-group/effects.png",
+    icon_size = 64,
+    flags = {"placeable-off-grid", "not-on-map"},
+    hidden = true,
+    subgroup = "explosions",
+    render_layer = "higher-object-above",
+    animations = {{
+      filename = "__warptorio-space-age-edge__/graphics/effects/teleport-explosion-1.png",
+      priority = "high",
+      width = 124,
+      height = 224,
+      frame_count = 30,
+      line_length = 6,
+      shift = util.by_pixel(-1, -20),
+      draw_as_glow = true,
+      animation_speed = 1,
+      scale = 0.5,
+    }, {
+      filename = "__warptorio-space-age-edge__/graphics/effects/teleport-explosion-2.png",
+      priority = "high",
+      width = 154,
+      height = 212,
+      frame_count = 41,
+      line_length = 6,
+      shift = util.by_pixel(-13, -18),
+      draw_as_glow = true,
+      animation_speed = 1,
+      scale = 0.5,
+    }, {
+      filename = "__warptorio-space-age-edge__/graphics/effects/teleport-explosion-3.png",
+      priority = "high",
+      width = 126,
+      height = 236,
+      frame_count = 39,
+      line_length = 6,
+      shift = util.by_pixel(0.5, -19),
+      draw_as_glow = true,
+      animation_speed = 1,
+      scale = 0.5,
+    }},
+    light = {intensity = 0.8, size = 10, color = blue_light},
+    sound = nil,
+    created_effect = make_teleport_ring_effect(),
+  },
+  {
+    type = "sound",
+    name = shared.teleport_boom_sound,
+    category = "explosion",
+    aggregation = {max_count = 1, remove = true},
+    audible_distance_modifier = 2,
+    variations = {
+      {filename = "__base__/sound/fight/nuclear-explosion-1.ogg", volume = 0.25},
+      {filename = "__base__/sound/fight/nuclear-explosion-2.ogg", volume = 0.25},
+      {filename = "__base__/sound/fight/nuclear-explosion-3.ogg", volume = 0.25},
+    },
+  },
+  {
+    type = "explosion",
+    name = shared.teleport_spark_effect,
+    localised_name = {"entity-name.small-explosion"},
+    icon = "__base__/graphics/item-group/effects.png",
+    icon_size = 64,
+    flags = {"placeable-off-grid", "not-on-map"},
+    hidden = true,
+    subgroup = "explosions",
+    light = {intensity = 0.25, size = 4, color = blue_light},
+    animations = make_empty_animation(),
+    sound = nil,
+    created_effect = {
+      type = "direct",
+      action_delivery = {
+        type = "instant",
+        source_effects = {
+          {
+            type = "create-particle",
+            particle_name = shared.teleport_spark_particle,
+            repeat_count = 4,
+            repeat_count_deviation = 2,
+            initial_height = 0.75,
+            initial_vertical_speed = 1.0 / 32,
+            initial_vertical_speed_deviation = 1.0 / 128,
+            tail_width = 4,
+            tail_length = 10,
+            frame_speed = 1,
+            frame_speed_deviation = 0.25,
+            speed_from_center = 0.0125,
+            speed_from_center_deviation = 0.005,
+            offset_deviation = {{-0.125, -0.125}, {0.125, 0.125}},
+          },
+        },
+      },
+    },
+  },
+})
+
 
 --[[for name,element in pairs(data.raw["tile"]) do
    if string.find(name,"concrete") then
@@ -195,7 +496,7 @@ data:extend{tile_platform,tile_world}
    end
    end]]
 
-local belt_speeds = { 15, 30, 45, 60 }
+local belt_speeds = shared.belt.speeds
 local belt_color = {
   {1,1,0.5},
   {1,0.5,0.5},
@@ -208,14 +509,15 @@ for i,v in ipairs(belt_speeds) do
   belt.minable_properties = {
     minable = false
   }
-  belt.name = "warp-platform-belt-"..v
+  belt.name = shared.belt.prefix..v
   tint_any_graphics(belt, belt_color[i])
   --belt.pictures.layers[1].tint = belt_color[i]
   data:extend{belt}
 end
 
 local acc = table.deepcopy(data.raw["accumulator"]["accumulator"])
-acc.name = "warp-power"
+acc.name = shared.power[1]
+acc.collision_box = {{-0.5, -0.5}, {0.5, 0.5}}
 acc.minable_properties = {
   minable = false
 }
@@ -230,7 +532,8 @@ acc.energy_source = -- energy source of accumulator
 data:extend{acc}
 
 local acc = table.deepcopy(data.raw["accumulator"]["accumulator"])
-acc.name = "warp-power-2"
+acc.name = shared.power[2]
+acc.collision_box = {{-0.5, -0.5}, {0.5, 0.5}}
 acc.minable_properties = {
   minable = false
 }
@@ -245,7 +548,8 @@ acc.energy_source = -- energy source of accumulator
 data:extend{acc}
 
 local acc = table.deepcopy(data.raw["accumulator"]["accumulator"])
-acc.name = "warp-power-3"
+acc.name = shared.power[3]
+acc.collision_box = {{-0.5, -0.5}, {0.5, 0.5}}
 acc.minable_properties = {
   minable = false
 }
@@ -294,27 +598,27 @@ support.support_range = support.support_range * 3
 
 data:extend{{
       type = "sound",
-      name = "warp-start",
-      filename = "__warptorio-space-age__/sounds/warp_start.wav",
+      name = shared.sounds.warp_start,
+      filename = "__warptorio-space-age-edge__/sounds/warp_start.wav",
       category = "environment",
 }}
 
 data:extend{{
       type = "sound",
-      name = "warp-end",
-      filename = "__warptorio-space-age__/sounds/warp_end.wav",
+      name = shared.sounds.warp_end,
+      filename = "__warptorio-space-age-edge__/sounds/warp_end.wav",
       category = "environment",
 }}
 data:extend{{
       type = "sound",
-      name = "planet-change",
-      filename = "__warptorio-space-age__/sounds/planet_change.wav",
+      name = shared.sounds.planet_change,
+      filename = "__warptorio-space-age-edge__/sounds/planet_change.wav",
       category = "alert",
 } }
 data:extend{{
       type = "sound",
-      name = "boss-spawn",
-      filename = "__warptorio-space-age__/sounds/boss_spawn.wav",
+      name = shared.sounds.boss_spawn,
+      filename = "__warptorio-space-age-edge__/sounds/boss_spawn.wav",
       category = "alert",
 }}
 
@@ -339,7 +643,7 @@ style.top_padding = 2
 style.bottom_padding = 2
 data.raw["gui-style"]["default"]["warptorio_frame"] = style
 
---change flamethrower-ammo to light oil
+-- change flamethrower-ammo to light oil
 
 local flamethrower_ammo = data.raw["recipe"]["flamethrower-ammo"]
 flamethrower_ammo.ingredients = {
@@ -425,12 +729,12 @@ if mods["quality"] then
 data.extend({
    {
       type = "quality",
-      name = "warp",
+      name = shared.quality_warp,
       level = 11,
       color = {194, 54, 22},
       order = "f",
       subgroup = "qualities",
-      icon = "__warptorio-space-age__/graphics/quality.png",
+      icon = "__warptorio-space-age-edge__/graphics/quality.png",
       beacon_power_usage_multiplier = 1,
       mining_drill_resource_drain_multiplier = 1,
       hidden_in_factoriopedia = true,
@@ -483,3 +787,49 @@ local function set_my_data(name, data)
 end
 -- use it like this
 data:extend{set_my_data(name, map_gen_settings)}]]
+
+-- ground minimap zoom controls
+data:extend{{
+   type = "custom-input",
+   name = shared.input_minimap_zoom_in,
+   key_sequence = "SHIFT + mouse-wheel-up",
+   consuming = "game-only",
+   action = "lua",
+}}
+data:extend{{
+   type = "custom-input",
+   name = shared.input_minimap_zoom_out,
+   key_sequence = "SHIFT + mouse-wheel-down",
+   consuming = "game-only",
+   action = "lua",
+}}
+
+-- Cross-mod custom events, raised in modules/events.lua.
+-- Other mods subscribe: script.on_event(defines.events["warptorio-..."], handler)
+local custom_events = {}
+for _, name in ipairs({
+  shared.events.warp_started,
+  shared.events.warp_finished,
+  shared.events.planet_chosen,
+  shared.events.wave_spawned,
+  shared.events.boss_spawned,
+  shared.events.boss_died,
+  shared.events.game_over,
+  shared.events.game_win,
+}) do
+  custom_events[#custom_events + 1] = { type = "custom-event", name = name }
+end
+data:extend(custom_events)
+
+-- Hidden signal that carries the warp-distance (void) destination icon, used as
+-- rich text in chat so the next-destination message shows an icon like real planets.
+data:extend{{
+   type = "virtual-signal",
+   name = "warptorio-void-destination",
+   icon = "__warptorio-space-age-edge__/graphics/destinations/deep-space.png",
+   icon_size = 256,
+   localised_name = {"virtual-signal-name.warptorio-void-destination"},
+   subgroup = "virtual-signal",
+   order = "zz[warptorio-void]",
+   hidden = true,
+}}

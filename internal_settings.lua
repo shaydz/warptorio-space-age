@@ -97,6 +97,7 @@ local local_settings = {
      ["gun-turret"]=4,["firearm-magazine"]=400,
   },
   platforms = {
+       loot_force = "warptorio-loot",
        loot_items = internal_loot(),
        save_triggers = {
           "warp-ground-platform-2",
@@ -197,7 +198,7 @@ local local_settings = {
   garden = {
     platform = {
        width = 31,
-       height = 2 + 31 *2
+       height = 4 + 31 *2
     },
     yumako={
         parts = {
@@ -242,7 +243,10 @@ local local_settings = {
     limit = 20*60,
     extra_transition_time = 1,
     add_per_jump=settings.startup["warptorio_time-per-jump"].value,
-    clicks_to_teleport = settings.startup["warptorio_players"].value
+    clicks_to_teleport = settings.startup["warptorio_players"].value,
+    new_player_threshold = 60*60*60,
+    afk_threshold = 60*60*5,
+    warp_countdown_seconds = 5
   },
   biter = {
     entity_type = {
@@ -271,7 +275,39 @@ local local_settings = {
         {"medium-strafer-pentapod","medium-stomper-pentapod"},
         {"big-strafer-pentapod","big-stomper-pentapod"},
         {"big-strafer-pentapod","big-stomper-pentapod", "small-demolisher"},
-      }
+      },
+      -- Boss name prefix -> planet that boss belongs to. Modded boss variants
+      -- only spawn on their home planet; when the matching biter mod is not
+      -- installed the variants never enter the boss pools at all, so planets
+      -- without them fall back to the vanilla bosses above.
+      boss_planet = {
+        ["maf-boss-explosive"] = "vulcanus",
+        ["maf-boss-frost"] = "aquilo",
+        ["maf-boss-toxic"] = "gleba",
+      },
+      -- Modded boss prefixes may additionally appear on other planets at a
+      -- reduced spawn weight (relative chance vs the other bosses of the same
+      -- tier). Keys override the weight per planet, "default" covers the rest.
+      boss_rare_planets = {
+        ["maf-boss-explosive"] = {
+          vulcanus = 1,
+          nauvis = 1,
+          default = 0.2,
+        },
+        ["maf-boss-frost"] = {
+          default = 0.2,
+        },
+        ["maf-boss-toxic"] = {
+          default = 0.2,
+        },
+      },
+      -- Per-boss spawn weight multiplier (prefix match, like boss_planet);
+      -- multiply the effective weight so a variant family can be made rarer
+      -- than its siblings. Spitter bosses are weighed down here so they only
+      -- show up as a rare change of pace instead of dominating the pool.
+      boss_weights = {
+        ["maf-boss-explosive-spitter"] = 0.05,
+      },
     },
     tresholds = {0,0.15,0.5,0.9},
     extra_time_planet = {},
@@ -292,6 +328,8 @@ local local_settings = {
     wave_change_index = 20,
     wave_change_chance = 0.3,
     wave_change_max = 40,
+    wave_ramp = 0.01,
+    wave_change_cap = 0.5,
     wave_amount = settings.startup["warptorio_wave-amount"].value,
     wave_increase = settings.startup["warptorio_wave-increase"].value,
     amount = 5,
@@ -299,7 +337,25 @@ local local_settings = {
     change = settings.startup["warptorio_wave-change"].value,
     min = 15,
     radius = 8,
-    max_bosses = 24,
+    max_bosses = 16,
+    boss_flood_ratio = 0.5,
+    boss_kill_time = 30,
+    boss_health_mult = 3,
+    -- Minimum collision half-size for boss prototypes. Chart dots scale with
+    -- the collision box, so small-biters-based bosses (maf-boss-*, box ~0.4)
+    -- must be blown up to the same footprint as pentapod bosses (~2.5) or they
+    -- stay biter-sized red dots on the map.
+    boss_min_box = 2.5,
+    boss_warp_count_every = 20,
+    -- Exact-name boss units that have no maf-boss-* prefix (planet-agnostic
+    -- biter mods like ArmouredBiters). The runtime block below inserts these
+    -- into the boss tiers when the mod is installed; data-final-fixes and the
+    -- runtime footprints derive the enlarged-prototype set from this list.
+    boss_extra = {
+       "big-armoured-biter",
+       "behemoth-armoured-biter",
+       "leviathan-armoured-biter",
+    },
     evolution = {
        base = 0,
        researches = {
@@ -323,6 +379,18 @@ local local_settings = {
   },
   starter = settings.startup["warptorio_starter"].value,
   reset_recipe = settings.startup["warptorio_reset-recipe"].value,
+  minimap = {
+     size = 300,
+     platform_fill = 4 / 3,
+     zoom_min = 0.1,
+     zoom_max = 60,
+     zoom_step = 1.15,
+     zoom_factor_min = 0.05,
+     zoom_factor_max = 100,
+     -- Radius beyond the platform centre (in tiles) that M.chart covers,
+     -- ensuring bosses spawn just inside the charted ring.
+     boss_reveal = 340,
+  },
   planet_timer = 30,
   stuck_in_space_chance = settings.startup["warptorio_stuck-in-space-chance"].value,
   going_home_chance = settings.startup["warptorio_going-home-chance"].value,
@@ -356,6 +424,7 @@ local local_settings = {
      time = "warp%-time",
      win = "warp%-end%-win",
      reactor = "warp%-reactor%-platform",
+     repair = "warptorio%-platform%-repair",
   },
   gui = {
      holder = "WarptorioGUI",
@@ -450,6 +519,9 @@ for name, version in pairs(script.active_mods) do
       {"flying-electric-unit-3","walking-electric-unit-3"},
       {"flying-electric-unit-4","walking-electric-unit-4"},
     }
+    -- The electric units (all tiers 1-4) are regular enemies only; no boss
+    -- tier is registered for them, so fulgora falls back to the vanilla
+    -- boss pools above.
     local_settings.dmg_research = false
   end
   if name == "Toxic_biters" then
@@ -471,10 +543,67 @@ for name, version in pairs(script.active_mods) do
     end
     --local_settings.biter.max_bosses = 1
   end
+  -- Armoured "snapper" biters are planet-agnostic; register the heavy
+  -- variants as tier bosses so they show as big red dots on the map.
+  if name == "ArmouredBiters-2_1-update" or name == "ArmouredBiters" then
+    local bosses = local_settings.biter.entity_type["boss"]
+    table.insert(bosses[2], "big-armoured-biter")
+    table.insert(bosses[3], "behemoth-armoured-biter")
+    table.insert(bosses[4], "leviathan-armoured-biter")
+  end
   if name == "exotic-space-industries" then
     local_settings.biter.trigger_research = "ei-electricity-age"
     local_settings.biter.trigger_wave = "ei-steam-age"
   end
 end
+
+local_settings.repair = {
+  speed = (settings.startup["warptorio_repair-speed"] and settings.startup["warptorio_repair-speed"].value) or "normal",
+  batch_configs = {
+    slow = {batch = 1, interval = 5},
+    normal = {batch = 5, interval = 5},
+    fast = {batch = 10, interval = 2},
+  }
+}
+
+local_settings.animation = {
+  expand_lock_ticks = 60 * 60 * 2,
+  build_anim_offset = {x = 0, y = 0},
+  anim_max_ticks = 600,
+}
+
+local_settings.teleporters = {
+  -- "$warp_zone" is resolved at runtime to the current ground surface name
+  ground_to_factory = {
+    surface = "$warp_zone",
+    position = {x = -1, y = -3},
+    box = {minx = -0.4, maxx = 2.4, miny = -0.4, maxy = 2.5},
+    destination = "factory",
+    color = {0.2, 0.9, 0.3},
+  },
+  factory_to_ground = {
+    surface = "factory",
+    position = {x = -1, y = 1},
+    box = {minx = -0.4, maxx = 2.4, miny = 0.3, maxy = 2.3},
+    destination = "$warp_zone",
+    color = {0.2, 0.9, 0.3},
+  },
+  factory_to_garden = {
+    surface = "factory",
+    position = {x = -3, y = -1},
+    box = {minx = -0.4, maxx = 1.6, miny = -0.4, maxy = 2.3},
+    destination = "garden",
+    biochamber = true,
+    color = {0.2, 0.4, 1.0},
+  },
+  garden_to_factory = {
+    surface = "garden",
+    position = {x = 2, y = -1},
+    box = {minx = -1.3, maxx = 1.3, miny = -0.4, maxy = 2.5},
+    destination = "factory",
+    biochamber = true,
+    color = {0.1, 0.8, 0.9},
+  },
+}
 
 return local_settings
