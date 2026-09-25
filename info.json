@@ -1,11 +1,22 @@
 {
-	"name": "warptorio-space-age",
+	"name": "warptorio-space-age-shaydz-fork",
 	"version": "0.4.4",
-	"title": "Warptorio 2.1 (Space Age)",
-	"author": "Venca",
-	"dependencies": ["base >= 1.1","space-age","+quality","?Toxic_biters","?Electric_flying_enemies","?Explosive_biters", "?Cold_biters", "?ArmouredBiters", "!Gun_Turret_Alerts"],
+	"title": "Warptorio 2.1 (Space Age) (Shaydz Fork)",
+	"author": "Venca, k1ng440, Shaydz",
+	"dependencies": [
+		"base >= 1.1",
+		"space-age",
+		"+quality",
+		"?Toxic_biters",
+		"?Electric_flying_enemies",
+		"?Explosive_biters",
+		"?Cold_biters",
+		"?ArmouredBiters",
+		"!Gun_Turret_Alerts",
+		"!warptorio-space-age",
+		"!warptorio-space-age-edge"
+	],
 	"description": "Build your base on a platform that warps from planet to planet and escape bitters before they overwhelm you.",
 	"factorio_version": "2.1",
-	"homepage":"https://openfun.itch.io"
+	"homepage": "https://github.com/shaydz/warptorio-space-age"
 }
-
