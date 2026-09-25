@@ -1294,6 +1294,9 @@ end
 -- boss_spawned event. Shared by the natural wave cadence (check_wave) and the
 -- warpcheat "Spawn boss wave" button.
 local function spawn_boss_wave(biter_index, quality)
+   if settings.global["warptorio_disable-bosses"] and settings.global["warptorio_disable-bosses"].value then
+      return 0
+   end
    -- Linear count: one boss per 10 waves plus an extra every 20 warps,
    -- no more random-on-random quadratic explosion.
    local wave_number = storage.warptorio.wave_index + 1
@@ -1413,7 +1416,10 @@ local function check_wave()
     end
   end
 
-  local spawn_boss = boss_system.spawn_boss_check()
+  local disable_waves = settings.global["warptorio_disable-enemy-waves"] and settings.global["warptorio_disable-enemy-waves"].value
+  local disable_bosses = settings.global["warptorio_disable-bosses"] and settings.global["warptorio_disable-bosses"].value
+
+  local spawn_boss = (not disable_bosses) and boss_system.spawn_boss_check()
   local quality = choose_quality(storage.warporio.index)  
   
   if limit <= 0 then
@@ -1425,23 +1431,25 @@ local function check_wave()
      if spawn_boss then
         flood_amount = math.max(3, math.floor(amount * warp_settings.biter.boss_flood_ratio))
      end
-    for i=1,flood_amount do
-      if technology_check() then break end
-      local biter_group = warp_settings.biter.entity_type["default"]
-      if storage.warptorio.surface_name and warp_settings.biter.entity_type[storage.warptorio.surface_name] then
-        biter_group = warp_settings.biter.entity_type[storage.warptorio.surface_name]
+    if not disable_waves then
+      for i=1,flood_amount do
+        if technology_check() then break end
+        local biter_group = warp_settings.biter.entity_type["default"]
+        if storage.warptorio.surface_name and warp_settings.biter.entity_type[storage.warptorio.surface_name] then
+          biter_group = warp_settings.biter.entity_type[storage.warptorio.surface_name]
+        end
+
+        --game.print("Spawning index "..biter_index.. " at evolution" .. evolution)
+        local biter_type = biter_group[biter_index][math.random(1,#biter_group[biter_index])]
+        local angry_amount = math.random(warp_settings.biter.amount/2,warp_settings.biter.amount)
+
+        --game.print("Sending gifts "..warp_settings.biter.quality[quality_index].." quality")
+        
+
+        boss_system.create_angry_biters(biter_type,angry_amount,storage.warptorio.warp_zone,quality)
       end
-
-      --game.print("Spawning index "..biter_index.. " at evolution" .. evolution)
-      local biter_type = biter_group[biter_index][math.random(1,#biter_group[biter_index])]
-      local angry_amount = math.random(warp_settings.biter.amount/2,warp_settings.biter.amount)
-
-      --game.print("Sending gifts "..warp_settings.biter.quality[quality_index].." quality")
-      
-
-      boss_system.create_angry_biters(biter_type,angry_amount,storage.warptorio.warp_zone,quality)
     end
-    if spawn_boss or technology_check() then
+    if not disable_bosses and (spawn_boss or technology_check()) then
        local spawned = spawn_boss_wave(biter_index, quality)
        if spawn_boss and (not technology_check()) and spawned > 0 then
           game.print({"warptorio.boss-warning"},{volume_modifier=0})
@@ -1451,7 +1459,7 @@ local function check_wave()
     storage.warptorio.wave_index = storage.warptorio.wave_index + 1
     events.raise(shared.events.wave_spawned, {
        index = storage.warptorio.wave_index,
-       amount = amount,
+       amount = disable_waves and 0 or amount,
        boss = spawn_boss,
        quality = quality,
        surface = storage.warptorio.warp_zone,

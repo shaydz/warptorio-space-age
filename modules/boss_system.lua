@@ -149,6 +149,9 @@ local function boss_chance_for_wave(wave)
 end
 
 function M.spawn_boss_check()
+  if settings.global["warptorio_disable-bosses"] and settings.global["warptorio_disable-bosses"].value then
+    return false
+  end
   -- Called before the wave counter is incremented, so the wave being spawned
   -- is counter+1 (this also keeps wave 1 from matching "% 10 == 0").
   -- Only one boss alert per warp; the flag is cleared on the next jump.

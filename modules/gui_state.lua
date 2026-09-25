@@ -155,8 +155,13 @@ function gui_state.update_all_labels()
   if storage.warporio and storage.warporio.index then
     index = storage.warporio.index
   end
-  update_label_if_changed(cache, "amount", index)
-  update_label_if_changed(cache, "wave-time", sec_to_time(storage.warptorio.wave_time))
+  local disable_waves = settings.global["warptorio_disable-enemy-waves"] and settings.global["warptorio_disable-enemy-waves"].value
+  local disable_bosses = settings.global["warptorio_disable-bosses"] and settings.global["warptorio_disable-bosses"].value
+  if disable_waves and disable_bosses then
+     update_label_if_changed(cache, "wave-time", "--:--")
+  else
+     update_label_if_changed(cache, "wave-time", sec_to_time(storage.warptorio.wave_time))
+  end
   update_label_if_changed(cache, "wave-amount", storage.warptorio.wave_index)
   if storage.warptorio.transition_timer > 60 then
      update_label_if_changed(cache, "warpout-time", sec_to_time(math.floor(storage.warptorio.transition_timer/60)))

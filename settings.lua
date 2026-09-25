@@ -231,4 +231,6 @@ data:extend({
   { type = "double-setting", name = "warptorio_boss-loot-chance", order = "11b", setting_type = "runtime-global", default_value = 25, minimum_value = 0, maximum_value = 100 },
   { type = "bool-setting", name = "warptorio_reset-evolution-warp", order = "11b", setting_type = "runtime-global", default_value = true },
   { type = "bool-setting", name = "warptorio_reset-gleba-evolution-warp", order = "11b", setting_type = "runtime-global", default_value = true },
+  { type = "bool-setting", name = "warptorio_disable-enemy-waves", order = "11b", setting_type = "runtime-global", default_value = false },
+  { type = "bool-setting", name = "warptorio_disable-bosses", order = "11b", setting_type = "runtime-global", default_value = false },
 })
