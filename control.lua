@@ -325,6 +325,27 @@ local function get_evolution_factor()
     return evolution
 end
 
+local function reset_surface_evolution(surface_name_or_obj)
+  local enemy_force = game.forces["enemy"]
+  if not enemy_force or not surface_name_or_obj then return end
+  local surf = surface_name_or_obj
+  if type(surf) == "string" then
+    surf = game.surfaces[surf]
+  end
+  if surf and surf.valid then
+    if enemy_force.set_evolution_factor_by_time then
+      enemy_force.set_evolution_factor_by_time(0, surf)
+    end
+    if enemy_force.set_evolution_factor_by_pollution then
+      enemy_force.set_evolution_factor_by_pollution(0, surf)
+    end
+    if enemy_force.set_evolution_factor_by_killing_spawners then
+      enemy_force.set_evolution_factor_by_killing_spawners(0, surf)
+    end
+    enemy_force.set_evolution_factor(0, surf)
+  end
+end
+
 local function remove_resources(surface)
   if storage.warptorio.ground_level == 0 then return end
   local level = storage.warptorio.ground_level
@@ -1217,6 +1238,13 @@ local function choose_quality(index)
       return "warp"
    end
    local evolution = get_evolution_factor()
+   if settings.global["warptorio_reset-evolution-warp"] and settings.global["warptorio_reset-evolution-warp"].value then
+      if storage.warptorio and storage.warptorio.warp_zone and game.surfaces[storage.warptorio.warp_zone] then
+         evolution = game.forces["enemy"].get_evolution_factor(storage.warptorio.warp_zone)
+      else
+         evolution = 0
+      end
+   end
    if evolution < warp_settings.biter.quality_evolution then
       storage.warptorio.last_normal = index
       return "normal"
@@ -1234,8 +1262,13 @@ end
 local function replace_common(entity)
    if entity.force.name ~= "enemy" then return end
    local evolution = get_evolution_factor()
-   -- Same gate as choose_quality: below it every enemy is normal quality anyway,
-   -- so there is nothing to replace.
+   if settings.global["warptorio_reset-evolution-warp"] and settings.global["warptorio_reset-evolution-warp"].value then
+      if storage.warptorio and storage.warptorio.warp_zone and game.surfaces[storage.warptorio.warp_zone] then
+         evolution = game.forces["enemy"].get_evolution_factor(storage.warptorio.warp_zone)
+      else
+         evolution = 0
+      end
+   end
    if evolution < warp_settings.biter.quality_evolution then
       return
    end
@@ -1824,7 +1857,36 @@ local function next_warp_zone_finish()
       end
     end
     pollution_settings()
-    game.forces["enemy"].set_evolution_factor(get_evolution_factor(),name)
+    local reset_evo = settings.global["warptorio_reset-evolution-warp"] and settings.global["warptorio_reset-evolution-warp"].value
+    local reset_gleba = settings.global["warptorio_reset-gleba-evolution-warp"] and settings.global["warptorio_reset-gleba-evolution-warp"].value
+    local is_gleba = (storage.warptorio.surface_name == "gleba") or (storage.warptorio.planet_next == "gleba")
+
+    if (reset_gleba and is_gleba) or reset_evo then
+       reset_surface_evolution(name)
+       if surface and surface.valid then
+          reset_surface_evolution(surface)
+       end
+    else
+       game.forces["enemy"].set_evolution_factor(get_evolution_factor(), name)
+    end
+
+    if reset_gleba then
+       if game.planets["gleba"] and game.planets["gleba"].surface and game.planets["gleba"].surface.valid then
+          reset_surface_evolution(game.planets["gleba"].surface)
+       end
+       if game.surfaces["gleba"] and game.surfaces["gleba"].valid then
+          reset_surface_evolution(game.surfaces["gleba"])
+       end
+    end
+
+    if reset_evo then
+       if game.planets["nauvis"] and game.planets["nauvis"].surface and game.planets["nauvis"].surface.valid then
+          reset_surface_evolution(game.planets["nauvis"].surface)
+       end
+       if game.surfaces["nauvis"] and game.surfaces["nauvis"].valid then
+          reset_surface_evolution(game.surfaces["nauvis"])
+       end
+    end
     
     if script.active_mods["rso-mod"] then
        remote.call("RSO", "resetGeneration", surface)
